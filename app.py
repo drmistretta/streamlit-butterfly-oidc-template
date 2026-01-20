@@ -1,13 +1,19 @@
+import base64
+import requests
 import streamlit as st
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Clean + Responsive Streamlit OIDC Starter (Mobile/Tablet/Desktop)
-# - White background, sans-serif system font stack (incl. Helvetica Neue)
+# Clean + Responsive Streamlit OIDC Starter + CNN Endpoint Prediction
+# - White background, sans-serif font stack (incl. Helvetica Neue)
 # - Tabs: Login | Butterfly Prediction
-# - Accessibility toggles that apply across screen sizes
+# - OIDC gate: prediction only available after login
+# - Upload or camera image -> base64 -> POST to endpoint -> show predicted_label
 # ──────────────────────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Butterfly App (OIDC Starter)", layout="centered")
+# Change ONLY if your endpoint changes
+ENDPOINT_URL = "https://askai.aiclub.world/83845c7c-6fc6-42c0-a3d4-b1918a688783"
+
+st.set_page_config(page_title="Butterfly Classifier (OIDC)", layout="centered")
 
 # ----------------------------- ACCESSIBILITY CONTROLS --------------------------
 with st.sidebar:
@@ -18,12 +24,13 @@ with st.sidebar:
     reduce_motion = st.toggle("Reduce motion", value=False)
     underline_links = st.toggle("Underline links", value=True)
     widen_layout = st.toggle("Wider reading layout", value=False)
-    show_helper_text = st.toggle("Show extra helper text", value=True)
+    show_helper_text = st.toggle("Show helper text", value=True)
+
+    # Optional toggles you can demo with teachers
+    increase_line_height = st.toggle("Increase line spacing", value=False)
+    reduce_shadows = st.toggle("Reduce shadows", value=False)
 
 # ----------------------------- GLOBAL CSS (RESPONSIVE) -------------------------
-# Notes for teachers:
-# - Streamlit runs in the browser; we use CSS variables to switch themes responsively.
-# - We prefer a system font stack; "Helvetica Neue" will be used when available.
 font_stack = (
     '"Helvetica Neue", Helvetica, Arial, system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
 )
@@ -37,18 +44,18 @@ BASE_CSS = f"""
 :root {{
   --bg: #ffffff;
   --surface: #ffffff;
-  --text: #111827;      /* near-black */
-  --muted: #4b5563;     /* gray */
-  --border: #e5e7eb;    /* light border */
-  --brand: #2563eb;     /* accessible blue */
+  --text: #111827;
+  --muted: #4b5563;
+  --border: #e5e7eb;
+  --brand: #2563eb;
   --brandHover: #1d4ed8;
-  --focus: #f59e0b;     /* amber focus ring */
+  --focus: #f59e0b;
   --radius: 14px;
-  --shadow: 0 6px 24px rgba(17, 24, 39, 0.08);
-  --maxw: 900px;
-  --pad: 1.0rem;
+  --shadow: {"0 6px 24px rgba(17, 24, 39, 0.08)" if not reduce_shadows else "none"};
+  --maxw: {1150 if widen_layout else 900}px;
   --font: {font_stack};
   --font-dys: {dyslexia_stack};
+  --lineh: {1.7 if increase_line_height else 1.45};
 }}
 
 html {{
@@ -59,6 +66,7 @@ body, [data-testid="stAppViewContainer"] {{
   background: var(--bg) !important;
   color: var(--text) !important;
   font-family: var(--font) !important;
+  line-height: var(--lineh) !important;
 }}
 
 a, .stMarkdown a {{
@@ -66,17 +74,11 @@ a, .stMarkdown a {{
   text-decoration: {"underline" if underline_links else "none"} !important;
   text-underline-offset: 2px;
 }}
-a:hover, .stMarkdown a:hover {{
-  color: var(--brandHover) !important;
-}}
+a:hover, .stMarkdown a:hover {{ color: var(--brandHover) !important; }}
 
 h1, h2, h3, h4, h5, h6 {{
   color: var(--text) !important;
   letter-spacing: -0.01em;
-}}
-
-p, li, span, label, small {{
-  color: var(--text);
 }}
 
 [data-testid="stSidebar"] > div:first-child {{
@@ -92,7 +94,6 @@ p, li, span, label, small {{
 
 {"@media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }" if reduce_motion else ""}
 
-/* Main container width + responsive padding */
 .block-container {{
   padding-top: 1.25rem !important;
   padding-bottom: 2.5rem !important;
@@ -106,7 +107,6 @@ p, li, span, label, small {{
   }}
 }}
 
-/* Card utility */
 .card {{
   background: var(--surface);
   border: 1px solid var(--border);
@@ -119,14 +119,12 @@ p, li, span, label, small {{
   margin-top: 1rem;
 }}
 
-/* Streamlit buttons: improve tap targets */
 .stButton > button {{
   border-radius: 12px !important;
   padding: 0.65rem 0.9rem !important;
   font-weight: 600 !important;
 }}
 
-/* Make inputs feel consistent */
 [data-baseweb="input"] > div,
 [data-baseweb="textarea"] > div,
 [data-baseweb="select"] > div {{
@@ -135,25 +133,18 @@ p, li, span, label, small {{
 
 {"body * { font-family: var(--font-dys) !important; }" if dyslexia_font else ""}
 
-/* Wider reading layout toggle */
-{" :root { --maxw: 1150px; } " if widen_layout else ""}
-
-/* High contrast mode toggle */
+/* High contrast mode */
 {" :root { --text:#000000; --muted:#111827; --border:#111827; --brand:#0000EE; --brandHover:#0000AA; } " if high_contrast else ""}
-
 </style>
 """
 st.markdown(BASE_CSS, unsafe_allow_html=True)
 
-# ----------------------------- HERO IMAGE -------------------------------------
-IMAGE_URL = "https://img.freepik.com/free-photo/fantasy-landscape-with-butterfly_23-2151451739.jpg"
-HERO_DESC_SHORT = "Decorative fantasy landscape with a butterfly."
-HERO_DESC_LONG = (
-    "A stylized, pastel fantasy landscape with a large butterfly in the foreground. "
-    "This image is decorative and does not contain required information."
-)
+def card_open():
+    st.markdown('<div class="card">', unsafe_allow_html=True)
 
-# ----------------------------- HELPERS ----------------------------------------
+def card_close():
+    st.markdown("</div>", unsafe_allow_html=True)
+
 def safe_user_field(*keys: str):
     """Try multiple keys from st.user and return the first non-empty value."""
     try:
@@ -169,9 +160,8 @@ def safe_user_field(*keys: str):
             pass
     return None
 
-
-def show_setup_hint_if_missing():
-    """Non-sensitive OIDC sanity check for student deployments."""
+def show_oidc_setup_check():
+    """Non-sensitive OIDC sanity check for deployments."""
     with st.sidebar.expander("OIDC setup check"):
         auth_cfg = dict(st.secrets.get("auth", {})) if hasattr(st, "secrets") else {}
         st.write(
@@ -183,32 +173,42 @@ def show_setup_hint_if_missing():
             }
         )
         if show_helper_text:
-            st.caption(
-                "Tip: Your Google OAuth Authorized redirect URI must exactly match redirect_uri. "
-                "Also ensure requirements.txt includes streamlit[auth]."
-            )
+            st.caption("Redirect URI must match Google OAuth Authorized redirect URI exactly.")
 
+# ----------------------------- PREDICTION HELPERS ------------------------------
+ALLOWED_EXT = {"jpg", "jpeg", "png", "jfif"}
 
-def card_open():
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+def call_model_endpoint(image_bytes: bytes, url: str) -> str:
+    """
+    Base64-encode image bytes and POST to the model endpoint.
+    Returns predicted_label if present.
+    """
+    payload_b64 = base64.b64encode(image_bytes)
 
+    try:
+        # NOTE: your endpoint expects base64 bytes in the request body (data=...).
+        r = requests.post(url, data=payload_b64, timeout=30)
+        r.raise_for_status()
+        js = r.json()
+        return js.get("predicted_label", "Unknown")
+    except requests.exceptions.Timeout:
+        st.error("Prediction timed out. Please try again.")
+        return "Error"
+    except Exception as e:
+        st.error(f"Prediction request failed: {e}")
+        return "Error"
 
-def card_close():
-    st.markdown("</div>", unsafe_allow_html=True)
+# ----------------------------- UI: HEADER + TABS -------------------------------
+st.markdown("# Butterfly App")
+st.caption("A responsive Streamlit example for mobile, tablet, laptop, and desktop.")
 
+tabs = st.tabs(["Login", "Butterfly Prediction"])
 
-# ----------------------------- TAB 1: LOGIN -----------------------------------
-def tab_login():
+# ----------------------------- TAB: LOGIN -------------------------------------
+with tabs[0]:
     card_open()
     st.markdown("## Login")
     st.write("Sign in with Google to capture your **name** and **email address** for personalization.")
-    card_close()
-
-    card_open()
-    st.image(IMAGE_URL, caption="Butterfly app background image", use_container_width=True)
-    st.caption(f"Image description: {HERO_DESC_SHORT}")
-    with st.expander("Detailed image description"):
-        st.write(HERO_DESC_LONG)
     card_close()
 
     card_open()
@@ -216,104 +216,87 @@ def tab_login():
         st.write("Status: **Not signed in**")
         if st.button("Log in with Google", type="primary"):
             st.login()
-        show_setup_hint_if_missing()
+        show_oidc_setup_check()
     else:
         display_name = safe_user_field("name", "full_name", "display_name") or "Signed-in user"
         email = safe_user_field("email")
+
         st.write("Status: **Signed in** ✅")
         st.write({"name": display_name, "email": email})
 
-        col1, col2 = st.columns([1, 2], vertical_alignment="center")
-        with col1:
-            if st.button("Log out", type="secondary"):
-                st.logout()
-        with col2:
-            if show_helper_text:
-                st.caption("Logging out clears Streamlit's identity cookie for this app.")
+        if st.button("Log out", type="secondary"):
+            st.logout()
     card_close()
 
-
-# ---------------------- TAB 2: BUTTERFLY PREDICTION (DEMO) ---------------------
-def tab_prediction():
-    card_open()
-    st.markdown("## Butterfly Prediction")
-    st.caption("This tab demonstrates a responsive input → output workflow. Replace the logic with your real model.")
-    card_close()
-
+# ----------------------------- TAB: BUTTERFLY PREDICTION -----------------------
+with tabs[1]:
     if not st.user.is_logged_in:
         card_open()
-        st.warning("Please log in first (go to the **Login** tab).")
+        st.warning("Please log in first (use the **Login** tab).")
         card_close()
-        return
+        st.stop()
 
-    # Personalized header
     display_name = safe_user_field("name", "full_name", "display_name") or "Signed-in user"
     email = safe_user_field("email")
 
+    HERO_URL = (
+        "https://images.unsplash.com/photo-1623615412998-c63b6d5fe9be?fm=jpg&q=60&w=3000&ixlib=rb-4.1.0"
+    )
+    HERO_DESC = "Monarch butterfly on a flower (decorative background for the classifier)."
+
     card_open()
-    st.markdown(f"### Welcome, {display_name}")
-    if show_helper_text:
-        st.caption(f"Signed-in email: {email or '(not provided)'}")
+    st.markdown(f"## Butterfly Classifier")
+    st.caption(f"Signed in as: {display_name}" + (f" • {email}" if email else ""))
+
+    st.image(HERO_URL, caption="Butterfly classification background image", use_container_width=True)
+    st.caption(f"Image description: {HERO_DESC}")
     card_close()
 
-    # Responsive form layout
     card_open()
-    st.markdown("### Provide observations")
-    with st.form("butterfly_form", clear_on_submit=False):
-        col1, col2 = st.columns(2, gap="medium")
+    st.markdown("### Upload or capture a butterfly image")
+    st.caption("Then click **Predict** to query the model endpoint.")
 
-        with col1:
-            wing_color = st.selectbox(
-                "Primary wing color",
-                ["Orange", "Yellow", "Blue", "Black", "White", "Brown", "Other"],
-            )
-            pattern = st.selectbox(
-                "Wing pattern",
-                ["Spots", "Stripes", "Solid", "Veins", "Mixed/Other"],
-            )
+    sub_tabs = st.tabs(["Image Upload", "Camera Upload"])
 
-        with col2:
-            wingspan_cm = st.slider("Estimated wingspan (cm)", 1, 20, 6)
-            location = st.text_input("Location (optional)", placeholder="e.g., school garden, local park")
+    # -------- Image Upload --------
+    with sub_tabs[0]:
+        image = st.file_uploader(
+            label="Upload a butterfly image",
+            accept_multiple_files=False,
+            type=list(ALLOWED_EXT),
+            help="Supported: jpg, jpeg, png, jfif",
+        )
 
-        notes = st.text_area("Additional notes (optional)", placeholder="e.g., seen near milkweed, sunny day…")
+        if image:
+            # Optional: validate MIME extension
+            ext = (image.type.split("/")[-1] or "").lower()
+            if ext not in ALLOWED_EXT:
+                st.error(f"Invalid file type: {image.type}")
+            else:
+                st.image(image, caption="Uploaded image", use_container_width=True)
 
-        submitted = st.form_submit_button("Predict", type="primary")
+                if st.button("Predict (Upload)", type="primary"):
+                    label = call_model_endpoint(image.getvalue(), ENDPOINT_URL)
+                    if label not in {"Error", "Unknown"}:
+                        st.success(f"Class Label: **{label}**")
+                    elif label == "Unknown":
+                        st.warning("Prediction returned 'Unknown'.")
+                    else:
+                        st.error("Could not retrieve a valid prediction.")
 
-    if submitted:
-        # Placeholder “prediction” logic for teaching:
-        # Replace with your ML inference code later.
-        score = 0
-        score += 2 if wing_color in ("Orange", "Yellow") else 1
-        score += 2 if pattern in ("Spots", "Stripes") else 1
-        score += 2 if wingspan_cm >= 6 else 1
+    # -------- Camera Upload --------
+    with sub_tabs[1]:
+        cam_image = st.camera_input("Take a photo")
+        if cam_image:
+            st.image(cam_image, caption="Captured image", use_container_width=True)
 
-        label = "Likely Monarch (demo)" if score >= 6 else "Likely Painted Lady (demo)"
+            if st.button("Predict (Camera)", type="primary"):
+                label = call_model_endpoint(cam_image.getvalue(), ENDPOINT_URL)
+                if label not in {"Error", "Unknown"}:
+                    st.success(f"Class Label: **{label}**")
+                elif label == "Unknown":
+                    st.warning("Prediction returned 'Unknown'.")
+                else:
+                    st.error("Could not retrieve a valid prediction.")
 
-        st.success(f"Prediction: **{label}**")
-        with st.expander("What was used to make this prediction?"):
-            st.write(
-                {
-                    "wing_color": wing_color,
-                    "pattern": pattern,
-                    "wingspan_cm": wingspan_cm,
-                    "location": location,
-                    "notes": notes,
-                    "demo_score": score,
-                }
-            )
-            st.caption("This is a demo rule-based predictor. Replace with a trained model for real predictions.")
     card_close()
-
-
-# ----------------------------- MAIN LAYOUT ------------------------------------
-st.markdown("# Butterfly App")
-st.caption("Responsive Streamlit example for mobile, tablet, laptop, and desktop.")
-
-tabs = st.tabs(["Login", "Butterfly Prediction"])
-
-with tabs[0]:
-    tab_login()
-
-with tabs[1]:
-    tab_prediction()
