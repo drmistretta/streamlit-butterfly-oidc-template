@@ -215,14 +215,6 @@ README.md               # This file
 
 ## ✅ License
 
-Add a license if desired (MIT is recommended for teaching templates).
+In this application, we will not add a license.
 
----
 
-If you’d like next:
-
-* a **grading-aligned rubric** tied to this template
-* a **Week 1 → Week 4 extension roadmap**
-* or a **student reflection prompt** aligned to accessibility + AI
-
-just tell me — this template is now classroom-ready.
